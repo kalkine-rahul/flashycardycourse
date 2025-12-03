@@ -1,0 +1,206 @@
+---
+alwaysApply: true
+---
+# Authentication and Authorization
+
+**CRITICAL SECURITY RULE**: All authentication is handled by **Clerk**. Users can **only** access their own data and must **never** be able to access data that does not belong to them.
+
+## Authentication Setup
+
+Clerk is configured in [src/app/layout.tsx](mdc:src/app/layout.tsx) with `ClerkProvider`, and middleware is set up in [src/middleware.ts](mdc:src/middleware.ts) using `clerkMiddleware`.
+
+## Getting the Current User
+
+### In Server Components and Server Actions
+
+Use `auth()` from `@clerk/nextjs/server` to get the current user:
+
+```typescript
+import { auth } from "@clerk/nextjs/server";
+
+// In Server Components or Server Actions
+const { userId } = await auth();
+
+if (!userId) {
+  // User is not authenticated - redirect or throw error
+  redirect("/sign-in");
+}
+```
+
+### In API Routes
+
+Use `auth()` similarly in API route handlers:
+
+```typescript
+import { auth } from "@clerk/nextjs/server";
+
+export async function GET(request: Request) {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  
+  // Proceed with authorized operation
+}
+```
+
+## Authorization - CRITICAL RULES
+
+### 1. Always Verify User Ownership
+
+**NEVER** trust client-provided IDs. Always verify that the resource belongs to the authenticated user:
+
+```typescript
+import { auth } from "@clerk/nextjs/server";
+import { db } from "@/db";
+import { decks, cards } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
+
+// ✅ CORRECT: Verify ownership before returning data
+const { userId } = await auth();
+if (!userId) throw new Error("Unauthorized");
+
+const userDecks = await db
+  .select()
+  .from(decks)
+  .where(eq(decks.userId, userId)); // Always filter by userId
+
+// ✅ CORRECT: Verify ownership before accessing specific resource
+const deck = await db
+  .select()
+  .from(decks)
+  .where(and(
+    eq(decks.id, deckId),
+    eq(decks.userId, userId) // CRITICAL: Verify ownership
+  ))
+  .limit(1);
+
+if (!deck.length) {
+  throw new Error("Deck not found or access denied");
+}
+
+// ✅ CORRECT: Verify deck ownership before accessing cards
+const deckCards = await db
+  .select()
+  .from(cards)
+  .innerJoin(decks, eq(cards.deckId, decks.id))
+  .where(and(
+    eq(decks.id, deckId),
+    eq(decks.userId, userId) // CRITICAL: Verify deck ownership
+  ));
+```
+
+### 2. Never Allow Direct Access by ID Alone
+
+**❌ WRONG** - This allows users to access any deck:
+```typescript
+// NEVER DO THIS - No ownership check!
+const deck = await db.select().from(decks).where(eq(decks.id, deckId));
+```
+
+**✅ CORRECT** - Always include userId check:
+```typescript
+const deck = await db
+  .select()
+  .from(decks)
+  .where(and(
+    eq(decks.id, deckId),
+    eq(decks.userId, userId) // Always verify ownership
+  ));
+```
+
+### 3. Always Set userId on Creation
+
+When creating new resources, always set the `userId` from the authenticated user:
+
+```typescript
+const { userId } = await auth();
+if (!userId) throw new Error("Unauthorized");
+
+const [newDeck] = await db.insert(decks).values({
+  name: "My Deck",
+  description: "Description",
+  userId: userId, // Always set from authenticated user
+}).returning();
+```
+
+### 4. Verify Ownership Before Updates/Deletes
+
+**ALWAYS** verify ownership before allowing updates or deletes:
+
+```typescript
+// ✅ CORRECT: Verify ownership before update
+const { userId } = await auth();
+if (!userId) throw new Error("Unauthorized");
+
+const [existingDeck] = await db
+  .select()
+  .from(decks)
+  .where(and(
+    eq(decks.id, deckId),
+    eq(decks.userId, userId) // Verify ownership
+  ))
+  .limit(1);
+
+if (!existingDeck) {
+  throw new Error("Deck not found or access denied");
+}
+
+// Now safe to update
+await db
+  .update(decks)
+  .set({ name: "Updated Name" })
+  .where(eq(decks.id, deckId));
+```
+
+### 5. For Nested Resources, Verify Parent Ownership
+
+When accessing cards, verify the parent deck belongs to the user:
+
+```typescript
+// ✅ CORRECT: Verify deck ownership before accessing cards
+const { userId } = await auth();
+if (!userId) throw new Error("Unauthorized");
+
+const card = await db
+  .select()
+  .from(cards)
+  .innerJoin(decks, eq(cards.deckId, decks.id))
+  .where(and(
+    eq(cards.id, cardId),
+    eq(decks.userId, userId) // Verify parent deck ownership
+  ))
+  .limit(1);
+
+if (!card.length) {
+  throw new Error("Card not found or access denied");
+}
+```
+
+## Security Checklist
+
+Before any database operation, ensure:
+
+1. ✅ User is authenticated (`userId` exists)
+2. ✅ All queries filter by `userId` or verify ownership
+3. ✅ No direct access by ID without ownership verification
+4. ✅ Updates/deletes verify ownership first
+5. ✅ Nested resources verify parent ownership
+6. ✅ Errors don't leak information about existence of other users' data
+
+## Error Handling
+
+When access is denied, use generic error messages to avoid information leakage:
+
+```typescript
+// ✅ CORRECT: Generic error message
+if (!deck.length) {
+  throw new Error("Resource not found"); // Don't reveal if it exists
+}
+
+// ❌ WRONG: Reveals information
+if (!deck.length) {
+  throw new Error("This deck belongs to another user"); // Information leak!
+}
+```

@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+# Shadcn UI already initialized
+
+This project uses Shadcn UI for all UI elements, and an existing
+[components.json](mdc:components.json) confirms it is already initialized. Do
+**not** rerun `npx shadcn@latest init` unless you intentionally remove that file
+and want to start over. If Shadcn UI is missing in a fresh clone, run `npx
+shadcn@latest init` from the repository root to reinitialize it.
+
+## Installed Components
+
+The following Shadcn UI components are already installed and available:
+
+- **Button**: The button component is installed at [src/components/ui/button.tsx](mdc:src/components/ui/button.tsx). Import it using `import { Button } from "@/components/ui/button"`.

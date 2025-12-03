@@ -1,0 +1,68 @@
+---
+globs: **/db/**/*.ts,**/api/**/*.ts,**/actions/**/*.ts
+description: Database interactions and queries
+---
+# Database Interactions
+
+This project uses **Neon** (serverless Postgres) with **Drizzle ORM** for all database operations.
+
+## Database Setup
+
+The database connection is configured in [src/db/index.ts](mdc:src/db/index.ts). The `db` instance is exported and should be imported for all database operations:
+
+```typescript
+import { db } from "@/db";
+```
+
+## Schema
+
+The database schema is defined in [src/db/schema.ts](mdc:src/db/schema.ts). Current tables:
+
+- **decks**: Flashcard decks with name, description, and userId (Clerk user ID)
+- **cards**: Individual flashcards with front/back content, linked to decks via deckId
+
+## Best Practices
+
+1. **Server-Side Only**: Database operations should only be performed in:
+   - Server Components (React Server Components)
+   - Server Actions
+   - API Routes (`/app/api/**`)
+   - Route Handlers
+
+2. **Never expose database operations to the client**. Always use Server Actions or API routes for database mutations.
+
+3. **Use Drizzle ORM queries**: Import query functions from `drizzle-orm`:
+   ```typescript
+   import { eq, and, desc } from "drizzle-orm";
+   import { decks, cards } from "@/db/schema";
+   ```
+
+4. **User Authentication**: Always verify user authentication (using Clerk) before performing database operations. The `userId` field in the schema stores Clerk user IDs.
+
+5. **Error Handling**: Always wrap database operations in try-catch blocks and handle errors appropriately.
+
+6. **Type Safety**: Use Drizzle's inferred types for type safety:
+   ```typescript
+   import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
+   ```
+
+## Example Usage
+
+```typescript
+import { db } from "@/db";
+import { decks, cards } from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+// Query user's decks
+const userDecks = await db.select().from(decks).where(eq(decks.userId, userId));
+
+// Insert a new deck
+const [newDeck] = await db.insert(decks).values({
+  name: "My Deck",
+  description: "Description",
+  userId: userId,
+}).returning();
+
+// Query cards for a deck
+const deckCards = await db.select().from(cards).where(eq(cards.deckId, deckId));
+```
